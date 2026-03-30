@@ -43,6 +43,10 @@ async def monitor_user(message: types.Message):
 async def ping():
     return {"status": "online", "timestamp": time.time()}
 
+@app.get("/")
+async def root():
+    return {"message": "Качка копаюча готова!"}
+
 async def main():
     config = Config(app=app, host="0.0.0.0", port=8000, loop="asyncio")
     server = Server(config)
