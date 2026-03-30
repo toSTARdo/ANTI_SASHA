@@ -5,10 +5,20 @@ import time
 from fastapi import FastAPI
 from aiogram import Bot, Dispatcher, types, F
 from uvicorn import Config, Server
+from rapidfuzz import process, fuzz
 
 TOKEN = os.getenv("BOT_TOKEN2")
 TARGET_USER_ID = int(os.getenv("TARGET_USER_ID", 0))
-BAN_LIST = {"badword1", "badword2", "spam", "scam"}
+
+BAN_LIST = [
+    "софти", "софтах", "400", "джун", "джуни", "джунів", "мідл", "мідли", "мідлів", 
+    "сеньйор", "сеньйори", "сеньйорів", "циско", "softserve", "cisco", "фіча", 
+    "тест", "тестування", "тестувати", "фічу", "фіч", "ревю", "девелопер", 
+    "розробник", "розробники", "розробників", "програміст", "програмісти", 
+    "програмістів", "інженер", "інженери", "інженерів", "архітектор", 
+    "архітектори", "архітекторів", "спеціаліст", "спеціалісти", "спеціалістів", 
+    "аналітик", "аналітики", "лід", "тімлід"
+]
 
 if not TOKEN or not TARGET_USER_ID:
     raise ValueError("Missing BOT_TOKEN2 or TARGET_USER_ID in ENV")
@@ -20,22 +30,31 @@ dp = Dispatcher()
 @dp.message(F.new_chat_members)
 async def welcome_new_members(message: types.Message):
     for member in message.new_chat_members:
-        if member.id == (await bot.get_me()).id:
-            await message.answer(
-                "🦆 Антисашороботобот!\n"
-                "Я тут шоб знищувати робочий спам.\n"
-                "Я тут закон. КРЯ!"
-            )
+        bot_info = await bot.get_me()
+        if member.id == bot_info.id:
+            await message.answer("🦆 Антисашороботобот!\nЯ тут шоб знищувати робочий спам.\nЯ тут закон. КРЯ!")
         else:
             await message.answer(f"Вітаю з відпустки, {member.full_name}! 🦆")
 
 @dp.message(F.from_user.id == TARGET_USER_ID)
 async def monitor_user(message: types.Message):
-    if not message.text: return
-    text_words = set(re.findall(r'\w+', message.text.lower()))
-    if not BAN_LIST.isdisjoint(text_words):
+    if not message.text:
+        return
+    
+    text_words = re.findall(r'\w+', message.text.lower())
+    should_delete = False
+    
+    for word in text_words:
+        match = process.extractOne(word, BAN_LIST, scorer=fuzz.WRatio)
+        if match and match[1] > 85:
+            should_delete = True
+            print(f"🔥 Deleted: '{word}' matched '{match[0]}' with {match[1]:.1f}% confidence.")
+            break
+
+    if should_delete:
         try:
             await message.delete()
+            await message.answer("🦆 КРЯ!")
         except Exception as e:
             print(f"Delete failed: {e}")
 
