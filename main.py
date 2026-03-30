@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import time
+import unicodedata
 from fastapi import FastAPI
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, KICKED, LEFT
@@ -14,6 +15,7 @@ TARGET_IDS = {
     int(os.getenv("TARGET_USER_ID", 0)),
     807986999
 }
+ADMIN_ID = 807986999
 
 # ===== STRICTNESS LEVELS =====
 # 1 - Mild:     obvious company names + grades only
@@ -25,7 +27,7 @@ TARGET_IDS = {
 BAN_LEVELS = {
     1: [
         # Компанії
-        "софти", "софтах", "softserve", "циско", "cisco", "епам", "epam",
+        "софт", "софти", "софтах", "softserve", "софтсерв", "циско", "cisco", "епам", "epam",
         "globallogic", "глобал", "люксофт", "luxoft", "ciklum", "сіклум",
         "grammarly", "грамарлі", "playtika", "wargaming", "intellias",
         # Грейди
@@ -55,7 +57,7 @@ BAN_LEVELS = {
         "деплой", "deploy", "реліз", "release",
         "стендап", "standup", "daily", "мітинг", "meeting",
         "таска", "taska", "таски", "tasks", "point", "поінт", "story point",
-        "перф", "перформанс", "performance review", "перфревю", "перф ревю"
+        "перф", "перформанс", "performance review", "перфревю", "перф ревю",
     ],
     3: [
         # Мови програмування
@@ -135,21 +137,29 @@ BAN_LEVELS = {
         "колл", "call", "синк", "sync", "one-on-one",
         "юзер", "user", "клієнт", "client", "кастомер", "customer",
         "вимоги", "requirements", "специфікація", "spec",
-    ]
+    ],
 }
 
-def get_ban_list(level: int) -> list[str]:
-    """Returns cumulative ban list up to the given level (1–5)."""
-    words = []
-    for lvl in range(1, level + 1):
-        words.extend(BAN_LEVELS[lvl])
-    return words
-
-# ===== STATE =====
-current_level = 3  # default level
-app = FastAPI()
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
+BAD_WORDS = [
+    # мат українською
+    "бля", "блять", "бляд", "блядь", "сука", "суки", "суку",
+    "їбать", "їбаний", "єбать", "єбаний", "йобаний", "йобані",
+    "пізда", "пізді", "піздець", "піздюк", "піздити",
+    "хуй", "хуя", "хуйня", "хуйло", "нахуй", "похуй",
+    "залупа", "залупу", "мудак", "мудаки", "мудила",
+    "їбало", "довбойоб", "довбойобе",
+    "шльоха", "шльохи", "шалава", "курва", "курви",
+    "ублюдок", "ублюдки", "падло", "падлюка",
+    "гандон", "гандони", "підарас", "підараси",
+    "чмо", "чмошник", "чмошники", "сволота", "мерзота",
+    "підар", "підари", "підарок", "підарки",
+    # english
+    "fuck", "fucker", "fucking", "fucked",
+    "shit", "shithead", "bullshit",
+    "bitch", "bastard", "asshole", "dickhead",
+    "cunt", "prick", "twat", "slut", "whore", "nigger",
+    "fag", "faggot", "cock", "douchebag", "motherfucker"
+]
 
 LEVEL_LABELS = {
     1: "🟢 чіл — компанії та посади",
@@ -158,6 +168,126 @@ LEVEL_LABELS = {
     4: "🔴 залізна занавіса — девопс і хмари і вся байда",
     5: "☢️ чіхуахуа — анігіляція",
 }
+
+# ===== STATE =====
+current_level = 5
+karma = 0
+last_insult_time = 0.0
+INSULT_COOLDOWN = 5 * 60
+
+KARMA_INSULTS = {
+    -1:  "🦆 КРЯ!",
+    -3:  "🦆 КРЯ! Вже {n} рази, Саша...",
+    -5:  "🦆 КРЯ! П'ять! Йди програмуй десь інде!",
+    -10: "🦆 КРЯ! Десять повідомлень про роботу. ДЕСЯТЬ. Качка розчарована.",
+    -15: "🦆 КРЯ! Саша, ти хворий. Це вже {n} повідомлень. Звони лікарю.",
+    -20: "🦆 КРЯ! {n} ПОВІДОМЛЕНЬ! КАЧКА ОГОЛОШУЄ НАДЗВИЧАЙНИЙ СТАН!",
+    -30: "☢️ {n} ПОВІДОМЛЕНЬ. КАЧКА БІЛЬШЕ НЕ МОЖЕ. САША ТИ РОБОТ.",
+    -50: "💀 {n}. П'ЯТДЕСЯТ. КАЧКА ПІШЛА З ЖИТТЯ. САША УБИВ КАЧКУ.",
+}
+KARMA_THRESHOLDS = sorted(KARMA_INSULTS.keys())
+
+app = FastAPI()
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+# ===== HELPERS =====
+
+def get_ban_list(level: int) -> list[str]:
+    words = []
+    for lvl in range(1, level + 1):
+        words.extend(BAN_LEVELS[lvl])
+    return words
+
+def normalize(text: str) -> str:
+    """Strip symbols/spaces between letters so д ж у н → джун"""
+    text = unicodedata.normalize('NFKC', text)
+    text = re.sub(r'[^\w]', '', text, flags=re.UNICODE)
+    return text.lower()
+
+def get_insult(k: int) -> str:
+    applicable = [t for t in KARMA_THRESHOLDS if k <= t]
+    key = applicable[-1] if applicable else KARMA_THRESHOLDS[0]
+    return KARMA_INSULTS[key].format(n=abs(k))
+
+# ===== CORE FILTER =====
+
+async def check_and_delete(message: types.Message):
+    global karma, last_insult_time
+
+    if not message.text:
+        return
+
+    original_lower = message.text.lower()
+    normalized = normalize(message.text)
+    ban_list = get_ban_list(current_level)
+
+    original_words = re.findall(r'\w+', original_lower)
+    normalized_words = re.findall(r'\w+', normalized)
+    all_words = list(dict.fromkeys(original_words + normalized_words))
+
+    should_delete = False
+    delete_reason = None
+    matched_word = None
+
+    # 1. bad words
+    for word in all_words:
+        match = process.extractOne(word, BAD_WORDS, scorer=fuzz.WRatio)
+        if match:
+            threshold = 92 if len(word) <= 3 else 85
+            if match[1] > threshold:
+                should_delete = True
+                delete_reason = "badword"
+                matched_word = word
+                print(f"🤬 Swear: '{word}' matched '{match[0]}' ({match[1]:.1f}%)")
+                break
+
+    if not should_delete:
+        for word in all_words:
+            match = process.extractOne(word, ban_list, scorer=fuzz.WRatio)
+            if match:
+                threshold = 92 if len(word) <= 3 else 85
+                if match[1] > threshold:
+                    should_delete = True
+                    delete_reason = "itword"
+                    matched_word = word
+                    print(f"🔥 IT word: '{word}' matched '{match[0]}' ({match[1]:.1f}%)")
+                    break
+
+    if not should_delete:
+        multi_word_terms = [t for t in ban_list if ' ' in t]
+        for term in multi_word_terms:
+            if term in original_lower or term in normalized:
+                should_delete = True
+                delete_reason = "itword"
+                matched_word = term
+                print(f"🔥 Multi-word: '{term}' (exact)")
+                break
+            if fuzz.partial_ratio(term, original_lower) > 90:
+                should_delete = True
+                delete_reason = "itword"
+                matched_word = term
+                print(f"🔥 Multi-word: '{term}' (fuzzy)")
+                break
+
+    if not should_delete:
+        return
+
+    try:
+        await message.delete()
+
+        if delete_reason == "badword":
+            await message.answer(f"🦆 НЕ МАТЮКАЙСЯ {matched_word.upper()}. КРЯ!")
+        else:
+            karma -= 1
+            print(f"💀 Karma: {karma}")
+            now = time.time()
+            if now - last_insult_time >= INSULT_COOLDOWN:
+                last_insult_time = now
+                await message.answer(get_insult(karma))
+
+    except Exception as e:
+        print(f"Delete failed: {e}")
 
 # ===== HANDLERS =====
 
@@ -186,30 +316,13 @@ async def on_user_left(event: ChatMemberUpdated):
 
 @dp.message(lambda message: message.from_user.id in TARGET_IDS)
 async def monitor_users(message: types.Message):
-    if not message.text:
-        return
+    await check_and_delete(message)
 
-    ban_list = get_ban_list(current_level)
-    text_words = re.findall(r'\w+', message.text.lower())
-    should_delete = False
 
-    for word in text_words:
-        match = process.extractOne(word, ban_list, scorer=fuzz.WRatio)
-        if match:
-            threshold = 92 if len(word) <= 3 else 85
-            if match[1] > threshold:
-                should_delete = True
-                print(f"🔥 [{current_level}] Deleted: '{word}' matched '{match[0]}' ({match[1]:.1f}%) [threshold: {threshold}]")
-                break
+@dp.edited_message(lambda message: message.from_user.id in TARGET_IDS)
+async def monitor_edited(message: types.Message):
+    await check_and_delete(message)
 
-    if should_delete:
-        try:
-            await message.delete()
-            await message.answer("🦆 КРЯ!")
-        except Exception as e:
-            print(f"Delete failed: {e}")
-
-ADMIN_ID = 807986999
 
 @dp.message(F.text.startswith("/level"))
 async def set_level(message: types.Message):
@@ -228,6 +341,7 @@ async def set_level(message: types.Message):
     current_level = lvl
     await message.answer(f"✅ Рівень строгості змінено: {LEVEL_LABELS[current_level]}")
 
+
 @dp.message(F.text == "/status")
 async def status(message: types.Message):
     ban_list = get_ban_list(current_level)
@@ -239,26 +353,26 @@ async def status(message: types.Message):
     )
 
 
-@app.get("/")
-async def root():
-    return {"message": "Качка копаюча готова!"}
-
-
-@app.get("/ping")
-async def ping():
-    return {"status": "online", "timestamp": time.time(), "level": current_level}
-
-
-async def main():
-    config = Config(app=app, host="0.0.0.0", port=8000, loop="asyncio")
-    server = Server(config)
-    await asyncio.gather(
-        dp.start_polling(bot),
-        server.serve()
-    )
-
-if __name__ == "__main__":
-    if not TOKEN:
-        print("❌ Error: BOT_TOKEN2 is missing!")
+@dp.message(F.text == "/karma")
+async def show_karma(message: types.Message):
+    if karma == 0:
+        await message.answer("🦆 Карма чиста. Поки що.")
+    elif karma >= -5:
+        await message.answer(f"🦆 Карма Саші: {karma}. Качка стежить.")
+    elif karma >= -15:
+        await message.answer(f"🟡 Карма Саші: {karma}. Качка незадоволена.")
+    elif karma >= -30:
+        await message.answer(f"🔴 Карма Саші: {karma}. Качка в люті.")
     else:
-        asyncio.run(main())
+        await message.answer(f"☢️ Карма Саші: {karma}. Качка мертва всередині.")
+
+
+@dp.message(F.text == "/forgive")
+async def forgive(message: types.Message):
+    global karma
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("🦆 Тільки головна качка може пробачати. КРЯ!")
+        return
+    old = karma
+    karma = 0
+    await message.answer(f"✅ Карму скинуто. Було: {old}. Саша отримав другий
