@@ -151,14 +151,15 @@ BAD_WORDS = [
     "шльоха", "шльохи", "шалава", "курва", "курви",
     "ублюдок", "ублюдки", "падло", "падлюка",
     "гандон", "гандони", "підарас", "підараси",
-    "чмо", "чмошник", "чмошники", "сволота", "мерзота",
-    "підар", "підари", "підарок", "підарки",
+    # мат російською
+    "блядь", "пизда", "хуйло", "мудак",
+    "ёбаный", "ебаный", "ёбать", "ебать",
+    "пиздец", "нихуя", "похуй",
     # english
     "fuck", "fucker", "fucking", "fucked",
     "shit", "shithead", "bullshit",
     "bitch", "bastard", "asshole", "dickhead",
-    "cunt", "prick", "twat", "slut", "whore", "nigger",
-    "fag", "faggot", "cock", "douchebag", "motherfucker"
+    "cunt", "prick", "twat",
 ]
 
 LEVEL_LABELS = {
@@ -242,6 +243,7 @@ async def check_and_delete(message: types.Message):
                 print(f"🤬 Swear: '{word}' matched '{match[0]}' ({match[1]:.1f}%)")
                 break
 
+    # 2. IT single words
     if not should_delete:
         for word in all_words:
             match = process.extractOne(word, ban_list, scorer=fuzz.WRatio)
@@ -254,6 +256,7 @@ async def check_and_delete(message: types.Message):
                     print(f"🔥 IT word: '{word}' matched '{match[0]}' ({match[1]:.1f}%)")
                     break
 
+    # 3. IT multi-word terms
     if not should_delete:
         multi_word_terms = [t for t in ban_list if ' ' in t]
         for term in multi_word_terms:
@@ -375,4 +378,33 @@ async def forgive(message: types.Message):
         return
     old = karma
     karma = 0
-    await message.answer(f"✅ Карму скинуто. Було: {old}. Саша отримав другий
+    await message.answer(f"✅ Карму скинуто. Було: {old}. Саша отримав другий шанс. 🕊️")
+
+
+# ===== API =====
+
+@app.get("/")
+async def root():
+    return {"message": "Качка копаюча готова!"}
+
+
+@app.get("/ping")
+async def ping():
+    return {"status": "online", "timestamp": time.time(), "level": current_level, "karma": karma}
+
+
+# ===== MAIN =====
+
+async def main():
+    config = Config(app=app, host="0.0.0.0", port=8000, loop="asyncio")
+    server = Server(config)
+    await asyncio.gather(
+        dp.start_polling(bot),
+        server.serve()
+    )
+
+if __name__ == "__main__":
+    if not TOKEN:
+        print("❌ Error: BOT_TOKEN2 is missing!")
+    else:
+        asyncio.run(main())
