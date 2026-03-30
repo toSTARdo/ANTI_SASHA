@@ -208,9 +208,14 @@ async def monitor_users(message: types.Message):
             print(f"Delete failed: {e}")
 
 
+ADMIN_ID = 807986999
+
 @dp.message(F.text.startswith("/level"))
 async def set_level(message: types.Message):
     global current_level
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("🦆 Ти не качка. КРЯ!")
+        return
     parts = message.text.strip().split()
     if len(parts) != 2 or not parts[1].isdigit():
         await message.answer("Usage: /level 1-5")
@@ -221,7 +226,6 @@ async def set_level(message: types.Message):
         return
     current_level = lvl
     await message.answer(f"✅ Рівень строгості змінено: {LEVEL_LABELS[current_level]}")
-
 
 @dp.message(F.text == "/status")
 async def status(message: types.Message):
