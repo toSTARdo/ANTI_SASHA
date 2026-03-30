@@ -68,6 +68,11 @@ async def monitor_users(message: types.Message):
         except Exception as e:
             print(f"Delete failed: {e}")
 
+
+@app.get("/")
+async def root():
+    return {"message": "Качка копаюча готова!"}
+
 @app.get("/ping")
 async def ping():
     return {"status": "online", "timestamp": time.time()}
