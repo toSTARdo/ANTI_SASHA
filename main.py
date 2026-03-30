@@ -67,6 +67,12 @@ async def monitor_user(message: types.Message):
         except Exception as e:
             print(f"Delete failed: {e}")
 
+@dp.message(F.from_user.id == TARGET_USER_ID)
+async def monitor_user(message: types.Message):
+    print(f"📨 Got message from target: {message.text}")
+    if not message.text:
+        return
+
 @app.get("/ping")
 async def ping():
     return {"status": "online", "timestamp": time.time()}
