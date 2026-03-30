@@ -268,7 +268,7 @@ async def check_and_delete(message: types.Message):
     # 2. fuzzy bad word check
     if not should_delete:
         for word in all_words:
-            match = process.extractOne(word, BAD_WORDS, scorer=fuzz.partial_ratio)
+            match = process.extractOne(word, BAD_WORDS, scorer=fuzz.ratio)
             if match:
                 threshold = 92 if len(word) <= 3 else 85
                 if match[1] > threshold:
@@ -281,7 +281,7 @@ async def check_and_delete(message: types.Message):
     # 3. IT single words
     if not should_delete:
         for word in all_words:
-            match = process.extractOne(word, cached_ban_list, scorer=fuzz.WRatio)
+            match = process.extractOne(word, BAD_WORDS, scorer=fuzz.ratio)
             if match:
                 threshold = 92 if len(word) <= 3 else 85
                 if match[1] > threshold:
