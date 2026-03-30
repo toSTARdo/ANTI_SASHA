@@ -4,6 +4,8 @@ import re
 import time
 from fastapi import FastAPI
 from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, KICKED, LEFT
+from aiogram.types import ChatMemberUpdated
 from uvicorn import Config, Server
 from rapidfuzz import process, fuzz
 
