@@ -293,6 +293,13 @@ async def check_and_delete(message: types.Message):
         print(f"Delete failed: {e}")
 
 # ===== HANDLERS =====
+@dp.message(lambda message: message.from_user.id in TARGET_IDS)
+async def debug_raw(message: types.Message):
+    if message.text:
+        print(f"📨 RAW: {repr(message.text)}")
+        print(f"📨 NORMALIZED: {repr(normalize(message.text))}")
+        print(f"📨 WORDS: {re.findall(r'[^w]+', message.text.lower())}")
+
 
 @dp.message(F.new_chat_members)
 async def welcome_new_members(message: types.Message):
