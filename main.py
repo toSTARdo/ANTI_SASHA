@@ -195,10 +195,12 @@ async def monitor_users(message: types.Message):
 
     for word in text_words:
         match = process.extractOne(word, ban_list, scorer=fuzz.WRatio)
-        if match and match[1] > 85:
-            should_delete = True
-            print(f"🔥 [{current_level}] Deleted: '{word}' matched '{match[0]}' ({match[1]:.1f}%)")
-            break
+        if match:
+            threshold = 92 if len(word) <= 3 else 85
+            if match[1] > threshold:
+                should_delete = True
+                print(f"🔥 [{current_level}] Deleted: '{word}' matched '{match[0]}' ({match[1]:.1f}%) [threshold: {threshold}]")
+                break
 
     if should_delete:
         try:
@@ -206,7 +208,6 @@ async def monitor_users(message: types.Message):
             await message.answer("🦆 КРЯ!")
         except Exception as e:
             print(f"Delete failed: {e}")
-
 
 ADMIN_ID = 807986999
 
