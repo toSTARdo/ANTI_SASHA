@@ -36,6 +36,13 @@ async def welcome_new_members(message: types.Message):
         else:
             await message.answer(f"Вітаю з відпустки, {member.full_name}! 🦆")
 
+@dp.chat_member(ChatMemberUpdatedFilter(member_status_changed=(KICKED | LEFT)))
+async def on_user_left(event: ChatMemberUpdated):
+    if event.new_chat_member.user.id == TARGET_USER_ID:
+        print(f"👋 TARGET GONE: {event.new_chat_member.user.full_name} has left or was kicked from the chat.")
+        
+        await bot.send_message(event.chat.id, "🦆 Відбулося правосуддя. КРЯ!")
+
 @dp.message(F.from_user.id == TARGET_USER_ID)
 async def monitor_user(message: types.Message):
     if not message.text:
